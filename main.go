@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/getlantern/systray"
 	"github.com/BurntSushi/xgbutil"
 	"github.com/BurntSushi/xgbutil/keybind"
 	"github.com/BurntSushi/xgbutil/xevent"
@@ -29,34 +30,48 @@ type AppConfig struct {
 const defaultConfig = `[general]
 app_select_prefix = "Control-Mod1"
 
-[app_select]
-b = { command = "firefox", process_name = "firefox", window_class = "Firefox" }
-t = { command = "kitty", process_name = "kitty", window_class = "kitty" }
+[app_select.b]
+command = "firefox"
+process_name = "firefox"
+window_class = "Firefox"
+
+[app_select.t]
+command = "kitty"
+process_name = "kitty"
+window_class = "kitty"
+
 # Add more applications here, e.g.:
-# c = { command = "chromium", process_name = "chromium", window_class = "Chromium" }
+# [app_select.c]
+# command = "chromium"
+# process_name = "chromium"
+# window_class = "Chromium"
 `
 
 func main() {
-	config, err := loadOrCreateConfig()
-	if err != nil {
-		fmt.Println("Error loading or creating config:", err)
-		return
-	}
+	go func() {
+		config, err := loadOrCreateConfig()
+		if err != nil {
+			fmt.Println("Error loading or creating config:", err)
+			return
+		}
 
-	X, err := xgbutil.NewConn()
-	if err != nil {
-		fmt.Println("Error connecting to X server:", err)
-		return
-	}
+		X, err := xgbutil.NewConn()
+		if err != nil {
+			fmt.Println("Error connecting to X server:", err)
+			return
+		}
 
-	keybind.Initialize(X)
+		keybind.Initialize(X)
 
-	for key, app := range config.AppSelect {
-		bindKey(X, config.General.AppSelectPrefix+"-"+key, app)
-	}
+		for key, app := range config.AppSelect {
+			bindKey(X, config.General.AppSelectPrefix+"-"+key, app)
+		}
 
-	fmt.Printf("Keymaps set. Use %s-[key] to launch or focus applications.\n", config.General.AppSelectPrefix)
-	xevent.Main(X)
+		fmt.Printf("Keymaps set. Use %s-[key] to launch or focus applications.\n", config.General.AppSelectPrefix)
+		xevent.Main(X)
+	}()
+
+	systray.Run(onReady, onExit)
 }
 
 func loadOrCreateConfig() (*Config, error) {
@@ -111,7 +126,6 @@ func isAppRunning(processName string) bool {
 }
 
 func focusApp(windowClass string) {
-	fmt.Printf("Focusing %s...\n", windowClass)
 	cmd := exec.Command("wmctrl", "-x", "-a", windowClass)
 	err := cmd.Run()
 	if err != nil {
@@ -120,11 +134,26 @@ func focusApp(windowClass string) {
 }
 
 func startApp(command string) {
-	fmt.Printf("Starting %s...\n", command)
 	parts := strings.Fields(command)
 	cmd := exec.Command(parts[0], parts[1:]...)
 	err := cmd.Start()
 	if err != nil {
 		fmt.Printf("Error starting %s: %v\n", command, err)
 	}
+}
+
+func onReady() {
+	systray.SetTitle("uiauto")
+	systray.SetTooltip("UI Automation Tool")
+
+	mQuit := systray.AddMenuItem("Quit", "Quit the application")
+
+	go func() {
+		<-mQuit.ClickedCh
+		systray.Quit()
+	}()
+}
+
+func onExit() {
+	// Clean up here if needed
 }
