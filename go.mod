@@ -1,4 +1,4 @@
-module uiauto
+module github.com/robertarles/uiauto
 
 go 1.22.2
 
