@@ -5,20 +5,23 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
-	"github.com/getlantern/systray"
 	"github.com/BurntSushi/xgbutil"
 	"github.com/BurntSushi/xgbutil/keybind"
 	"github.com/BurntSushi/xgbutil/xevent"
+	"github.com/getlantern/systray"
 )
 
 type Config struct {
 	General struct {
-		AppSelectPrefix string `toml:"app_select_prefix"`
+		AppSelectPrefix    string `toml:"app_select_prefix"`
+		WindowManagePrefix string `toml:"window_manage_prefix"`
 	} `toml:"general"`
-	AppSelect map[string]AppConfig `toml:"app_select"`
+	AppSelect    map[string]AppConfig `toml:"app_select"`
+	WindowManage map[string]string    `toml:"window_manage"`
 }
 
 type AppConfig struct {
@@ -29,22 +32,17 @@ type AppConfig struct {
 
 const defaultConfig = `[general]
 app_select_prefix = "Control-Mod1"
+window_manage_prefix = "Cmd-Mod4"
 
-[app_select.b]
-command = "firefox"
-process_name = "firefox"
-window_class = "Firefox"
-
-[app_select.t]
-command = "kitty"
-process_name = "kitty"
-window_class = "kitty"
-
+[app_select]
+b = { command = "firefox", process_name = "firefox", window_class = "Firefox" }
+t = { command = "kitty", process_name = "kitty", window_class = "kitty" }
+f = { command = "dolphin", process_name = "dolphin", window_class = "dolphin" }
 # Add more applications here, e.g.:
-# [app_select.c]
-# command = "chromium"
-# process_name = "chromium"
-# window_class = "Chromium"
+# c = { command = "chromium", process_name = "chromium", window_class = "Chromium" }
+
+[window_manage]
+center = "Super-Mod1-M"
 `
 
 func main() {
@@ -66,8 +64,13 @@ func main() {
 		for key, app := range config.AppSelect {
 			bindKey(X, config.General.AppSelectPrefix+"-"+key, app)
 		}
-
 		fmt.Printf("Keymaps set. Use %s-[key] to launch or focus applications.\n", config.General.AppSelectPrefix)
+
+		// Bind the window management keys
+		for action, keyCombo := range config.WindowManage {
+			bindWindowManagementKey(X, config.General.WindowManagePrefix+"-"+keyCombo, action)
+		}
+		fmt.Printf("Keymaps set. Use %s-[key] to manage windows.\n", config.General.AppSelectPrefix)
 		xevent.Main(X)
 	}()
 
@@ -108,6 +111,60 @@ func bindKey(X *xgbutil.XUtil, keyCombo string, app AppConfig) {
 		}).Connect(X, X.RootWin(), keyCombo, true)
 	if err != nil {
 		fmt.Printf("Error binding key for %s: %v\n", app.Command, err)
+	}
+}
+
+func bindWindowManagementKey(X *xgbutil.XUtil, keyCombo string, action string) {
+	err := keybind.KeyPressFun(
+		func(X *xgbutil.XUtil, e xevent.KeyPressEvent) {
+			if action == "center" {
+				centerWindow()
+			}
+		}).Connect(X, X.RootWin(), keyCombo, true)
+	if err != nil {
+		fmt.Printf("Error binding window management key: %v\n", err)
+	}
+}
+
+func centerWindow() {
+	// Get screen dimensions using xrandr
+	output, err := exec.Command("xrandr").Output()
+	if err != nil {
+		fmt.Println("Error getting screen dimensions:", err)
+		return
+	}
+
+	// Assume the first connected screen is the primary one (more sophisticated parsing can be added)
+	lines := strings.Split(string(output), "\n")
+	var screenWidth, screenHeight int
+	for _, line := range lines {
+		if strings.Contains(line, " connected") {
+			fields := strings.Fields(line)
+			resolution := strings.Split(fields[2], "+")[0]
+			dimensions := strings.Split(resolution, "x")
+			screenWidth = strToInt(dimensions[0])
+			screenHeight = strToInt(dimensions[1])
+			break
+		}
+	}
+
+	if screenWidth == 0 || screenHeight == 0 {
+		fmt.Println("Error parsing screen dimensions.")
+		return
+	}
+
+	// Calculate 75% of screen dimensions
+	targetWidth := int(float64(screenWidth) * 0.75)
+	targetHeight := int(float64(screenHeight) * 0.75)
+
+	// Calculate top-left corner to center the window
+	x := (screenWidth - targetWidth) / 2
+	y := (screenHeight - targetHeight) / 2
+
+	// Use wmctrl to move and resize the active window
+	err = exec.Command("wmctrl", "-r", ":ACTIVE:", "-e", fmt.Sprintf("0,%d,%d,%d,%d", x, y, targetWidth, targetHeight)).Run()
+	if err != nil {
+		fmt.Println("Error centering window:", err)
 	}
 }
 
@@ -156,4 +213,9 @@ func onReady() {
 
 func onExit() {
 	// Clean up here if needed
+}
+
+func strToInt(s string) int {
+	i, _ := strconv.Atoi(s)
+	return i
 }
