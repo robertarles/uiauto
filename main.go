@@ -214,8 +214,18 @@ func onReady() {
 
 	// Set the icon
 	systray.SetIcon(iconData)
-	mQuit := systray.AddMenuItem("Quit", "Quit the application")
+	appHome := systray.AddMenuItem("uiauto", "https://github.com/robertarles/uiauto")
+	appHomeUrl := "https://github.com/robertarles/uiauto"
+	cmd := "xdg-open"
+	args := []string{appHomeUrl}
+	go func () {
+		<-appHome.ClickedCh
+    exec.Command(cmd, args...).Start()
+	}()
 
+	systray.AddSeparator()
+	
+	mQuit := systray.AddMenuItem("Quit", "Quit the application")
 	go func() {
 		<-mQuit.ClickedCh
 		systray.Quit()
